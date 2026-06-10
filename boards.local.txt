@@ -1,0 +1,18 @@
+# Custom partition override for all common ESP32-C3 compatible boards.
+# This ensures the correct partition size is used regardless of board selection.
+# App slot size: 0x1E0000 = 1966080 bytes (1.875 MB)
+
+lolin_c3_mini.build.partitions=partitions
+lolin_c3_mini.upload.maximum_size=1966080
+
+esp32c3.build.partitions=partitions
+esp32c3.upload.maximum_size=1966080
+
+seeed_xiao_esp32c3.build.partitions=partitions
+seeed_xiao_esp32c3.upload.maximum_size=1966080
+
+dfrobot_beetle_esp32_c3.build.partitions=partitions
+dfrobot_beetle_esp32_c3.upload.maximum_size=1966080
+
+airm2m_core_esp32c3.build.partitions=partitions
+airm2m_core_esp32c3.upload.maximum_size=1966080

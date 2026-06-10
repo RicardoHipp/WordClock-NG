@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>WordClock Icon Editor · 8×16</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Courier New', monospace;
+  background: #12121e;
+  color: #d0d0e0;
+  padding: 24px;
+  user-select: none;
+}
+h2 {
+  color: #7eb8f7;
+  margin-bottom: 20px;
+  font-size: 20px;
+  letter-spacing: 1px;
+}
+.section { margin-bottom: 18px; }
+.label {
+  font-size: 11px;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+/* Palette */
+#palette { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch {
+  width: 60px;
+  height: 60px;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 3px solid #2a2a3a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.swatch:hover { transform: scale(1.1); }
+.swatch.sel { border: 3px solid #fff !important; box-shadow: 0 0 10px rgba(255,255,255,0.35); }
+.swatch .idx  { font-size: 20px; font-weight: bold; line-height: 1; }
+.swatch .name { font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Grid */
+#grid-wrap {
+  display: inline-block;
+  border: 2px solid #2a2a3a;
+  cursor: crosshair;
+  line-height: 0;
+}
+#grid {
+  display: grid;
+  grid-template-columns: repeat(16, 28px);
+  background: #2a2a3a;
+  gap: 1px;
+  padding: 1px;
+}
+.cell {
+  width: 28px;
+  height: 56px;   /* 2× width — jede Zelle doppelt so hoch wie breit */
+}
+.cell:hover { filter: brightness(1.25); }
+
+/* Controls */
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+input[type=text] {
+  background: #0d0d1a;
+  border: 1px solid #3a3a50;
+  color: #c0c0e0;
+  padding: 7px 12px;
+  border-radius: 5px;
+  font-family: monospace;
+  font-size: 14px;
+  width: 210px;
+  outline: none;
+}
+input[type=text]:focus { border-color: #5a7aaf; }
+button {
+  background: #1b3358;
+  color: #90b8e8;
+  border: 1px solid #2a4a78;
+  padding: 7px 16px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+button:hover { background: #264a7a; }
+button.accent { background: #183a28; color: #70c888; border-color: #2a5a3a; }
+button.accent:hover { background: #235035; }
+button.warn { background: #3a1a1a; color: #c07070; border-color: #5a2a2a; }
+button.warn:hover { background: #502020; }
+
+/* Code area */
+#code {
+  width: 100%;
+  height: 210px;
+  background: #090912;
+  border: 1px solid #2a2a3a;
+  color: #6ddf8f;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px;
+  border-radius: 6px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.3s;
+}
+#code.flash { border-color: #6ddf8f; }
+
+.hint { font-size: 11px; color: #555; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h2>WordClock Icon Editor · 8×16</h2>
+
+<div class="section">
+  <div class="label">Farbe — Linksklick/Drag = malen · Rechtsklick = löschen</div>
+  <div id="palette"></div>
+</div>
+
+<div class="section">
+  <div id="grid-wrap"><div id="grid"></div></div>
+</div>
+
+<div class="section controls">
+  <label style="font-size:13px;color:#777">Name:</label>
+  <input type="text" id="iname" value="WI_MY_ICON">
+  <button onclick="importCode()">↑ Importieren</button>
+  <button class="warn" onclick="clearGrid()">✕ Leeren</button>
+  <button class="accent" onclick="copyCode()">⎘ Code kopieren</button>
+</div>
+
+<div class="section">
+  <div class="label">C-Code — hier einfügen und Importieren klicken · wird beim Zeichnen automatisch aktualisiert</div>
+  <textarea id="code" spellcheck="false"></textarea>
+  <div class="hint">Tipp: Bestehenden Code aus weather_icons.h hier einfügen → Importieren → bearbeiten → kopieren</div>
+</div>
+
+<script>
+const DEFS = [
+  { idx: 0, rgb: [20, 20, 30],    name: 'off',    light: true  },
+  { idx: 1, rgb: [255, 255, 100], name: 'Blitz',  light: false },
+  { idx: 3, rgb: [255, 200, 0],   name: 'Sonne',  light: false },
+  { idx: 4, rgb: [0, 100, 255],   name: 'Regen',  light: true  },
+  { idx: 5, rgb: [90, 100, 120],  name: 'Krater', light: true  },
+  { idx: 6, rgb: [200, 220, 255], name: 'Mond',   light: false },
+  { idx: 7, rgb: [180, 210, 255], name: 'Schnee', light: false },
+  { idx: 9, rgb: [180, 180, 180], name: 'Wolke',  light: false },
+];
+
+const COLOR = {};
+DEFS.forEach(d => COLOR[d.idx] = `rgb(${d.rgb.join(',')})`);
+
+const ROWS = 8, COLS = 16;
+let grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+let selColor = 6;
+let painting = false;
+let paintVal = 6;
+const cells = [];
+
+// --- Palette ---
+const palEl = document.getElementById('palette');
+DEFS.forEach(d => {
+  const sw = document.createElement('div');
+  sw.className = 'swatch' + (d.idx === selColor ? ' sel' : '');
+  sw.style.background = `rgb(${d.rgb.join(',')})`;
+  const tc = d.light ? '#ccc' : '#111';
+  sw.innerHTML =
+    `<span class="idx"  style="color:${tc}">${d.idx}</span>` +
+    `<span class="name" style="color:${tc}">${d.name}</span>`;
+  sw.addEventListener('click', () => {
+    selColor = d.idx;
+    document.querySelectorAll('.swatch').forEach(s => s.classList.remove('sel'));
+    sw.classList.add('sel');
+  });
+  palEl.appendChild(sw);
+});
+
+// --- Grid ---
+const gridEl = document.getElementById('grid');
+for (let r = 0; r < ROWS; r++) {
+  cells[r] = [];
+  for (let c = 0; c < COLS; c++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.style.background = COLOR[0];
+
+    cell.addEventListener('mousedown', e => {
+      e.preventDefault();
+      painting = true;
+      paintVal = (e.button === 2) ? 0 : selColor;
+      paint(r, c, paintVal);
+    });
+    cell.addEventListener('mouseenter', () => {
+      if (painting) paint(r, c, paintVal);
+    });
+    cell.addEventListener('contextmenu', e => e.preventDefault());
+
+    gridEl.appendChild(cell);
+    cells[r][c] = cell;
+  }
+}
+document.addEventListener('mouseup', () => painting = false);
+
+function paint(r, c, val) {
+  grid[r][c] = val;
+  cells[r][c].style.background = COLOR[val] ?? COLOR[0];
+  updateCode();
+}
+
+// --- Code generation ---
+function updateCode() {
+  const name = document.getElementById('iname').value.trim() || 'WI_MY_ICON';
+  let s = `const uint8_t ${name}[8][16] PROGMEM = {\n`;
+  for (let r = 0; r < ROWS; r++) {
+    s += '  {' + grid[r].join(',') + '}' + (r < ROWS - 1 ? ',' : '') + '\n';
+  }
+  s += '};';
+  document.getElementById('code').value = s;
+}
+
+// --- Import ---
+function importCode() {
+  const text = document.getElementById('code').value;
+
+  // Name
+  const nm = text.match(/uint8_t\s+(\w+)/);
+  if (nm) document.getElementById('iname').value = nm[1];
+
+  // Rows: match every {n,n,n,...} block with exactly 16 comma-separated values
+  const rowRe = /\{([\d,\s]+)\}/g;
+  const rows = [];
+  let m;
+  while ((m = rowRe.exec(text)) !== null) {
+    const nums = m[1].split(',').map(s => parseInt(s.trim(), 10));
+    if (nums.length === COLS && nums.every(n => !isNaN(n))) {
+      rows.push(nums);
+    }
+  }
+
+  if (rows.length < ROWS) {
+    alert(`Nur ${rows.length} gültige Zeile(n) mit je ${COLS} Werten gefunden.\nBrauche ${ROWS}.`);
+    return;
+  }
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const val = rows[r][c] ?? 0;
+      grid[r][c] = val;
+      cells[r][c].style.background = COLOR[val] ?? COLOR[0];
+    }
+  }
+  updateCode();
+}
+
+// --- Clear ---
+function clearGrid() {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      grid[r][c] = 0;
+      cells[r][c].style.background = COLOR[0];
+    }
+  updateCode();
+}
+
+// --- Copy ---
+function copyCode() {
+  const ta = document.getElementById('code');
+  ta.select();
+  document.execCommand('copy');
+  ta.classList.add('flash');
+  setTimeout(() => ta.classList.remove('flash'), 600);
+}
+
+document.getElementById('iname').addEventListener('input', updateCode);
+
+// Init
+updateCode();
+</script>
+</body>
+</html>
