@@ -1,6 +1,5 @@
 # Lokale Hilfsordner ignorieren
 .claude/
-build/
 
 # Lokale Skripte ignorieren
 upload.bat
