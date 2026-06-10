@@ -3,3 +3,10 @@
 
 # Lokale Skripte ignorieren
 upload.bat
+
+# Riesige temporäre Compiler-Dateien ignorieren
+build/**/*.elf
+build/**/*.map
+build/**/*.json
+build/**/sdkconfig
+build/**/flash_args
