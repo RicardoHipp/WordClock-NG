@@ -65,6 +65,7 @@
 RTC_DS3231 ds3231;
 bool ds3231Found = false;
 bool ds3231SyncEnabled = true;     // Kann über die WebUI pausiert werden, um Drift-Tests durchzuführen
+uint32_t lastSyncEpoch = 0;        // UTC-Epoch des letzten "Sync Time"-Klicks (0 = noch nie)
 
 void showStrip() {
   strip.show();
@@ -236,6 +237,15 @@ static time_t utcToEpoch(struct tm *t) {
 }
 
 void ds3231SyncSystemClock() {
+  // Auf den naechsten Sekunden-Tick des DS3231 warten: das Sekundenregister
+  // kann schon bis zu 1s "alt" sein (unbekannte Phase innerhalb der Sekunde).
+  // Durch Pollen bis zum Wechsel wird die ESP-Uhr auf wenige ms genau an die
+  // echte DS3231-Sekundengrenze ausgerichtet (statt bis zu 1s Rueckwaerts-Bias).
+  uint8_t startSec = ds3231.now().second();
+  unsigned long t0 = millis();
+  while (ds3231.now().second() == startSec && millis() - t0 < 1100) {
+    delay(5);
+  }
   DateTime rtcUtc = ds3231.now();
   struct tm t = {};
   t.tm_year  = rtcUtc.year() - 1900;
@@ -713,6 +723,8 @@ void setupWebInterface() {
       checkforNightMode();
       invalidateDstCache();
       updatenow = true;
+      lastSyncEpoch = (uint32_t)epoch;                   // Zeitpunkt des manuellen Syncs merken (für Drift-Anzeige)
+      changedvalues = true;
     }
 
     // changedvalues=true → main loop calls setFlashValues() (thread-safe on ESP32-C3)
@@ -734,6 +746,7 @@ void setupWebInterface() {
     if (offset > 12) offset -= 24;
     if (offset < -12) offset += 24;
     char espBuf[20], rtcLocalBuf[20], utcBuf[20], offsetBuf[6], tempBuf[8];
+    uint32_t rtcEpochOut = 0;
     snprintf(espBuf,    sizeof(espBuf),    "%02d.%02d.%04d %02d:%02d:%02d",
              localTm.tm_mday, localTm.tm_mon+1, localTm.tm_year+1900,
              localTm.tm_hour, localTm.tm_min,   localTm.tm_sec);
@@ -749,6 +762,7 @@ void setupWebInterface() {
       rtcUtcTm.tm_mday = rtcUtc.day();       rtcUtcTm.tm_hour = rtcUtc.hour();
       rtcUtcTm.tm_min  = rtcUtc.minute();    rtcUtcTm.tm_sec  = rtcUtc.second();
       time_t rtcEpoch = utcToEpoch(&rtcUtcTm);
+      rtcEpochOut = (uint32_t)rtcEpoch;
       struct tm rtcLocal; localtime_r(&rtcEpoch, &rtcLocal);
       snprintf(rtcLocalBuf, sizeof(rtcLocalBuf), "%02d.%02d.%04d %02d:%02d:%02d",
                rtcLocal.tm_mday, rtcLocal.tm_mon+1, rtcLocal.tm_year+1900,
@@ -758,7 +772,7 @@ void setupWebInterface() {
       snprintf(rtcLocalBuf, sizeof(rtcLocalBuf), "--");
       snprintf(tempBuf, sizeof(tempBuf), "--");
     }
-    String json = "{\"esp_time\":\"" + String(espBuf) + "\",\"rtc_local\":\"" + String(rtcLocalBuf) + "\",\"utc_time\":\"" + String(utcBuf) + "\",\"utc_offset\":\"" + String(offsetBuf) + "\",\"ds3231_found\":" + String(ds3231Found ? 1 : 0) + ",\"ds3231_sync\":" + String(ds3231SyncEnabled ? 1 : 0) + ",\"ds3231_temp\":\"" + String(tempBuf) + "\"}";
+    String json = "{\"esp_time\":\"" + String(espBuf) + "\",\"rtc_local\":\"" + String(rtcLocalBuf) + "\",\"utc_time\":\"" + String(utcBuf) + "\",\"utc_offset\":\"" + String(offsetBuf) + "\",\"ds3231_found\":" + String(ds3231Found ? 1 : 0) + ",\"ds3231_sync\":" + String(ds3231SyncEnabled ? 1 : 0) + ",\"ds3231_temp\":\"" + String(tempBuf) + "\",\"rtc_epoch\":" + String(rtcEpochOut) + ",\"last_sync_epoch\":" + String(lastSyncEpoch) + "}";
     request->send(200, "application/json", json);
   });
 
@@ -909,6 +923,7 @@ void getFlashValues() {
   wifiTimeout     = preferences.getUInt("wifiTimeout",     wifiTimeout_default);
   ntpSyncHour     = preferences.getUInt("ntpSyncHour",     ntpSyncHour_default);
   ntpSyncMinute   = preferences.getUInt("ntpSyncMinute",   ntpSyncMinute_default);
+  lastSyncEpoch   = preferences.getUInt("lastSyncEpoch",   0);
   if (debugtexts == 1) Serial.println("Read settings from flash: END");
 }
 
@@ -948,6 +963,7 @@ void setFlashValues() {
   preferences.putUInt("wifiTimeout",      wifiTimeout);
   preferences.putUInt("ntpSyncHour",      ntpSyncHour);
   preferences.putUInt("ntpSyncMinute",    ntpSyncMinute);
+  preferences.putUInt("lastSyncEpoch",    lastSyncEpoch);
   if (debugtexts == 1) Serial.println("Write settings to flash: END");
   checkforNightMode();
   updatenow = true;  // Update display now...

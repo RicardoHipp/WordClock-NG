@@ -133,11 +133,11 @@ select:focus,input[type=time]:focus{border-color:var(--a);box-shadow:0 0 0 3px r
     </div>
     <div class="card">
       <div class="clbl">Brightness Day &mdash; <span class="rv" id="v-bd">-</span></div>
-      <input type="range" id="brightness_day" min="0" max="255" oninput="document.getElementById('v-bd').textContent=this.value;deb('brightness_day',this.value)">
+      <input type="range" id="brightness_day" min="0" max="50" oninput="document.getElementById('v-bd').textContent=this.value;deb('brightness_day',this.value)">
     </div>
     <div class="card">
       <div class="clbl">Brightness Night &mdash; <span class="rv" id="v-bn">-</span></div>
-      <input type="range" id="brightness_night" min="0" max="255" oninput="document.getElementById('v-bn').textContent=this.value;deb('brightness_night',this.value)">
+      <input type="range" id="brightness_night" min="0" max="50" oninput="document.getElementById('v-bn').textContent=this.value;deb('brightness_night',this.value)">
     </div>
     <div class="card">
       <div class="clbl">Day starts at</div>
@@ -146,6 +146,14 @@ select:focus,input[type=time]:focus{border-color:var(--a);box-shadow:0 0 0 3px r
     <div class="card">
       <div class="clbl">Day ends after</div>
       <input type="time" id="day_stop" onchange="s('day_stop',this.value)">
+    </div>
+    <div class="card full">
+      <div class="clbl">Helligkeit &uuml;ber 50 zulassen</div>
+      <div class="tog-row">
+        <span class="cval" id="l-hb">Aus (max. 50)</span>
+        <label class="tog"><input type="checkbox" id="high_brightness" onchange="toggleHighBrightness(this.checked)"><span class="tog-sl"></span></label>
+      </div>
+      <div class="cval" style="font-size:11px;color:var(--ink3)">Werte &uuml;ber 50 ben&ouml;tigen je nach LED-Anzahl ein deutlich st&auml;rkeres Netzteil. Nur aktivieren, wenn dieses ausreichend dimensioniert ist.</div>
     </div>
   </div>
 </div>
@@ -252,6 +260,20 @@ select:focus,input[type=time]:focus{border-color:var(--a);box-shadow:0 0 0 3px r
     <div class="card">
       <div class="clbl">DS3231 Chip-Temperatur</div>
       <div class="cmono" style="font-size:13px" id="ds3231_temp">--</div>
+    </div>
+    <div class="card">
+      <div class="clbl">DS3231 Drift (vs. Browser)</div>
+      <div class="cmono" style="font-size:13px" id="ds3231_drift">--</div>
+    </div>
+    <div class="card">
+      <div class="clbl">Letzter Sync (Sync Time)</div>
+      <div class="cmono" style="font-size:13px" id="last_sync">--</div>
+      <div class="cval" style="font-size:11px;color:var(--ink3)" id="last_sync_ago"></div>
+    </div>
+    <div class="card">
+      <div class="clbl">Hochrechnung: Abweichung / Jahr (DS3231)</div>
+      <div class="cmono" style="font-size:13px" id="drift_projection">--</div>
+      <div class="cval" style="font-size:11px;color:var(--ink3)">Basierend auf der Drift seit dem letzten "Sync Time"-Klick. Grobe Sch&auml;tzung (Netzwerk-Latenz &asymp; &plusmn;1s)</div>
     </div>
     <div class="card">
       <div class="clbl">RTC-Abgleich (Drift-Test)</div>
@@ -500,23 +522,28 @@ function toggleOTA(){
   });
 }
 function getDevTime(){
-  var now=new Date();
-  var ts=now.getFullYear()+'-'+
-    String(now.getMonth()+1).padStart(2,'0')+'-'+
-    String(now.getDate()).padStart(2,'0')+'T'+
-    String(now.getHours()).padStart(2,'0')+':'+
-    String(now.getMinutes()).padStart(2,'0')+':'+
-    String(now.getSeconds()).padStart(2,'0')+'.000';
-  fetch('/api/set?device_time='+encodeURIComponent(ts))
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.ok){
-        var n=new Date();
-        document.getElementById('dev_time_status').textContent=
-          'Set: '+String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')+':'+String(n.getSeconds()).padStart(2,'0');
-        toast('Time synced');
-      }
-    });
+  // Bis zum naechsten exakten Sekundenwechsel warten und dann sofort senden:
+  // so bleibt als Fehler nur noch die (kleine, konstante) Netzwerklatenz statt bis zu 0.5s Rundungsjitter
+  var target=Math.ceil(Date.now()/1000)*1000;
+  setTimeout(function(){
+    var now=new Date(target);
+    var ts=now.getFullYear()+'-'+
+      String(now.getMonth()+1).padStart(2,'0')+'-'+
+      String(now.getDate()).padStart(2,'0')+'T'+
+      String(now.getHours()).padStart(2,'0')+':'+
+      String(now.getMinutes()).padStart(2,'0')+':'+
+      String(now.getSeconds()).padStart(2,'0')+'.000';
+    fetch('/api/set?device_time='+encodeURIComponent(ts))
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.ok){
+          var n=new Date();
+          document.getElementById('dev_time_status').textContent=
+            'Set: '+String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')+':'+String(n.getSeconds()).padStart(2,'0');
+          toast('Time synced');
+        }
+      });
+  }, target-Date.now());
 }
 
 function testAnimation(){
@@ -558,6 +585,29 @@ function tog(key,lblId,checked){
   if(lblId)st(lblId,checked?'On':'Off');
   s(key,checked?1:0);
 }
+// Helligkeits-Limit (Sicherheits-Bestaetigung fuer ausreichend starkes Netzteil):
+// nur lokale Anzeige/Grenze, wird nicht auf dem Geraet gespeichert.
+function setBrightnessLimit(checked){
+  sc('high_brightness',checked);
+  st('l-hb',checked?'An (max. 255)':'Aus (max. 50)');
+  var max=checked?255:50;
+  var d=el('brightness_day');if(d)d.max=max;
+  var n=el('brightness_night');if(n)n.max=max;
+}
+// onchange-Handler der Checkbox: bei Deaktivierung Werte >50 sofort auf 50 kappen
+function toggleHighBrightness(checked){
+  setBrightnessLimit(checked);
+  if(!checked){
+    ['brightness_day','brightness_night'].forEach(function(id){
+      var sl=el(id);if(!sl)return;
+      if(Number(sl.value)>50){
+        sl.value=50;
+        st(id==='brightness_day'?'v-bd':'v-bn',50);
+        deb(id,50);
+      }
+    });
+  }
+}
 
 function apply(d){
   st('fw',d.version);
@@ -567,6 +617,9 @@ function apply(d){
   sc('random_color',d.random_color);st('l-rc',d.random_color?'On':'Off');
   sc('single_min',d.single_min);st('l-sm',d.single_min?'On':'Off');
   sc('night_mode',d.night_mode);st('l-nm',d.night_mode?'On':'Off');
+  // Falls bereits ein Wert >50 gespeichert ist (z.B. ueber die Legacy-API gesetzt),
+  // Limit-Sperre automatisch aufheben statt den Wert beim Laden zu kappen:
+  setBrightnessLimit(d.brightness_day>50 || d.brightness_night>50);
   sv('brightness_day',d.brightness_day);st('v-bd',d.brightness_day);
   sv('brightness_night',d.brightness_night);st('v-bn',d.brightness_night);
   sv('day_start',d.day_start);sv('day_stop',d.day_stop);
@@ -603,7 +656,38 @@ function apply(d){
 }
 
 function poll(){fetch('/api/get').then(function(r){return r.json();}).then(apply).catch(function(){});}
-function pollTime(){fetch('/api/time').then(function(r){return r.json();}).then(function(d){st('esp_time',d.esp_time||'--:--:--');st('rtc_local',d.rtc_local||'--:--:--');st('utc_time',d.utc_time||'--:--:--');st('utc_offset',d.utc_offset||'--');st('ds3231_status',d.ds3231_found?'Connected ✓':'Not detected');st('ds3231_temp',d.ds3231_temp||'--');setRtcSyncBtn(!!d.ds3231_sync);}).catch(function(){});}
+function fmtElapsed(sec){
+  if(sec<0)sec=0;
+  var d=Math.floor(sec/86400), h=Math.floor((sec%86400)/3600), m=Math.floor((sec%3600)/60);
+  if(d>0)return 'vor '+d+'d '+h+'h';
+  if(h>0)return 'vor '+h+'h '+m+'min';
+  return 'vor '+m+'min';
+}
+function fmtDuration(sec){
+  var sign=sec<0?'-':'+', abs=Math.abs(sec);
+  if(abs>=3600)return sign+(abs/3600).toFixed(1)+' h';
+  if(abs>=60)return sign+(abs/60).toFixed(1)+' min';
+  return sign+abs.toFixed(0)+' s';
+}
+function pollTime(){fetch('/api/time').then(function(r){return r.json();}).then(function(d){
+  st('esp_time',d.esp_time||'--:--:--');st('rtc_local',d.rtc_local||'--:--:--');st('utc_time',d.utc_time||'--:--:--');st('utc_offset',d.utc_offset||'--');st('ds3231_status',d.ds3231_found?'Connected ✓':'Not detected');st('ds3231_temp',d.ds3231_temp||'--');setRtcSyncBtn(!!d.ds3231_sync);
+  var nowSec=Math.floor(Date.now()/1000);
+  var drift=(d.ds3231_found&&d.rtc_epoch)?(d.rtc_epoch-nowSec):null;
+  st('ds3231_drift',drift===null?'--':(drift>=0?'+':'')+drift+' s');
+  var sinceSync=d.last_sync_epoch?(nowSec-d.last_sync_epoch):null;
+  if(sinceSync!==null){
+    st('last_sync', new Date(d.last_sync_epoch*1000).toLocaleString());
+    st('last_sync_ago', fmtElapsed(sinceSync));
+  } else {
+    st('last_sync','Noch nicht synchronisiert');
+    st('last_sync_ago','');
+  }
+  if(drift!==null&&sinceSync!==null&&sinceSync>=60){
+    st('drift_projection',fmtDuration(drift/sinceSync*365*86400));
+  } else {
+    st('drift_projection','--');
+  }
+}).catch(function(){});}
 var rtcSyncActive=true;
 function setRtcSyncBtn(active){
   rtcSyncActive=active;
